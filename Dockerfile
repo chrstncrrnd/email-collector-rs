@@ -7,4 +7,4 @@ COPY . .
 RUN cargo install --path .
 EXPOSE 8080 8080
 
-CMD [ "mongo-rust-shop" ]
+CMD [ "email-collector-rs" ]
