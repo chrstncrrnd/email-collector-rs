@@ -1,6 +1,9 @@
+use actix_governor::Governor;
 use actix_web::{get, web, App, HttpResponse, HttpServer, Responder};
 use lazy_static::lazy_static;
+use log::{error, info};
 use mongodb::{
+    bson::doc,
     options::{ClientOptions, Credential},
     Client,
 };
@@ -21,7 +24,7 @@ lazy_static! {
 const MAX_EMAIL_LENGTH_CHARS: usize = 1024;
 
 #[derive(Serialize, Deserialize)]
-struct Model {
+struct SubmittedEmailModel {
     email: String,
     created_at: String,
 }
@@ -33,23 +36,51 @@ async fn index() -> impl Responder {
 
 #[get("/add-email/{email}")]
 async fn add_email(email: web::Path<String>, client: web::Data<Client>) -> impl Responder {
+    info!("Adding new email: {}", email);
     // Make sure its not too long
     if email.chars().count() > MAX_EMAIL_LENGTH_CHARS {
-        HttpResponse::PayloadTooLarge().body("Email should not exceed 1024 characters");
+        return HttpResponse::PayloadTooLarge().body("Email should not exceed 1024 characters");
     }
     // Make sure its an actual email
     if !EMAIL_REGEX.is_match(&email) {
-        HttpResponse::NotAcceptable().body("Invalid email");
+        return HttpResponse::NotAcceptable().body("Invalid email");
     }
 
     let now = chrono::Utc::now();
     let now_str = now.to_rfc3339();
 
-    match client
+    let collection = client
         .database(DB_NAME.as_str())
-        .collection::<Model>("emails")
+        .collection::<SubmittedEmailModel>("emails");
+
+    // Check if the email exists already in the database
+    match collection
+        .find_one(
+            doc! {
+                "email": email.to_string()
+            },
+            None,
+        )
+        .await
+    {
+        Ok(d) => {
+            if let Some(_) = d {
+                info!("Email {} already in database", email);
+                return HttpResponse::Ok()
+                    .body("No changes were made, email already exists in database");
+            }
+        }
+        Err(e) => {
+            error!("Mongo query failed: {}", e);
+            return HttpResponse::InternalServerError()
+                .body("Something went wrong with database query");
+        }
+    }
+
+    // Add the email to the database
+    match collection
         .insert_one(
-            Model {
+            SubmittedEmailModel {
                 email: email.to_string(),
                 created_at: now_str,
             },
@@ -57,8 +88,14 @@ async fn add_email(email: web::Path<String>, client: web::Data<Client>) -> impl 
         )
         .await
     {
-        Ok(_) => HttpResponse::Ok().body("Added email"),
-        Err(e) => HttpResponse::InternalServerError().body(e.kind.to_string()),
+        Ok(_) => {
+            info!("Successfully added email to database");
+            HttpResponse::Ok().body("Added email")
+        }
+        Err(e) => {
+            error!("An error occurred whilst adding email to database: {} ", e);
+            HttpResponse::InternalServerError().body(e.kind.to_string())
+        }
     }
 }
 
@@ -66,6 +103,14 @@ async fn add_email(email: web::Path<String>, client: web::Data<Client>) -> impl 
 async fn main() -> std::io::Result<()> {
     dotenvy::dotenv().ok().unwrap();
     env_logger::init();
+
+    let governor_conf = actix_governor::GovernorConfigBuilder::default()
+        .per_second(10)
+        .burst_size(10)
+        .finish()
+        .unwrap();
+
+    info!("Starting server");
 
     let username = env::var("MONGO_USER").unwrap();
     let password = env::var("MONGO_PASSWORD").unwrap();
@@ -84,10 +129,12 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(move || {
         App::new()
+            .wrap(Governor::new(&governor_conf))
             .app_data(web::Data::new(client.clone()))
             .service(index)
+            .service(add_email)
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind(("0.0.0.0", 8080))?
     .run()
     .await
 }
