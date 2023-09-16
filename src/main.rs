@@ -9,10 +9,10 @@ use mongodb::{
 };
 use std::env;
 
-use crate::routes::{add_email, index};
+use crate::routes::{add_email, index, message};
 mod models;
 mod routes;
-mod validator;
+mod validators;
 
 lazy_static! {
     static ref DB_NAME: String = env::var("MONGO_DB").unwrap_or("DEV".to_owned());
@@ -24,8 +24,8 @@ async fn main() -> std::io::Result<()> {
     env_logger::init();
 
     let governor_conf = actix_governor::GovernorConfigBuilder::default()
-        .per_second(2)
-        .burst_size(10)
+        .per_second(1)
+        .burst_size(2)
         .finish()
         .unwrap();
 
@@ -52,6 +52,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(client.clone()))
             .service(index)
             .service(add_email)
+            .service(message)
     })
     .bind(("0.0.0.0", 8080))?
     .run()

@@ -22,3 +22,8 @@ pub fn email_validator(email: String) -> Result<bool, HttpResponse> {
     }
     Ok(true)
 }
+
+pub fn string_appropriate_size(s: String) -> bool {
+    let length = s.chars().count();
+    length < 50_000 && length > 0
+}
