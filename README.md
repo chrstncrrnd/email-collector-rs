@@ -2,4 +2,7 @@
 - Collect user's emails
 - Allow users to send you messages
 
-Designed for pre-launch websites where you want to collect the email of anyone who is interested in your product or allow them to contact you.
+## Features: 
+- Designed for pre-launch websites
+- Saves any emails submitted to a mongo database 
+- Messages are stored in the database with a subject and the sender's email so you can reach out to them again 
